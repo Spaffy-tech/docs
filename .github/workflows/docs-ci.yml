@@ -1,0 +1,47 @@
+# Validate committed documentation assets on the trusted default branch only.
+name: Documentation checks
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+permissions:
+  contents: read
+concurrency:
+  group: docs-ci-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    if: github.ref == 'refs/heads/main' && github.repository == 'Spaffy-tech/docs'
+    runs-on: spaffy-ci
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Validate JSON and local navigation assets
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          config = json.loads(Path('docs.json').read_text())
+          def check_pages(node):
+              """Check local page references recursively without fetching remote content."""
+              if isinstance(node, dict):
+                  for key, value in node.items():
+                      if key == 'pages':
+                          for page in value:
+                              if isinstance(page, str) and not page.startswith(('http://', 'https://')):
+                                  assert Path(page + '.mdx').is_file() or Path(page + '.md').is_file(), page
+                              else:
+                                  check_pages(page)
+                      else:
+                          check_pages(value)
+              elif isinstance(node, list):
+                  for item in node:
+                      check_pages(item)
+          check_pages(config['navigation'])
+          for asset in [config['favicon'], *config['logo'].values()]:
+              ET.parse(Path(asset.lstrip('/')))
+          print('Documentation JSON, navigation pages and SVG assets are valid.')
+          PY
